@@ -1,0 +1,188 @@
+%% @author Bruce Kissinger
+%% @version 0.0.3
+
+% @doc This module provides a CloudI service for interacting with the Folsom application.
+%Folsom is an Erlang-based application that can collect realtime metrics and publish them. 
+%This CloudI service allows other CloudI services to define new Folsom metrics, update those metrics, and get the current metric values.
+%Note that metric results are returned as JSON encoded strings
+ 
+-module(cloudi_service_folsom).
+-behaviour(cloudi_service).
+
+%% cloudi_service callbacks
+-export([cloudi_service_init/4,
+         cloudi_service_handle_request/11,
+         cloudi_service_handle_info/3,
+         cloudi_service_terminate/3]).
+
+-include_lib("cloudi_core/include/cloudi_logger.hrl").
+
+%% record definitions
+-record(state,
+    {
+    }).
+
+%% Define common types
+-type dispatcher_type() :: pid().
+-type name_type() :: nonempty_string().
+-type ok_state_type() :: {'ok', #state{}}.
+-type pattern_type() :: nonempty_string().
+-type record_type() :: any().
+-type request_type() :: nonempty_string().
+-type state_type() :: any().		%% enhance this
+-type type_type() :: nonempty_string().	
+
+%%%------------------------------------------------------------------------
+%%% Exported functions
+%%%------------------------------------------------------------------------
+
+%% @doc Initialize the internal service
+%%-spec cloudi_service_init(_, _, _) -> ok_state_type.
+-spec cloudi_service_init(_, _, _, dispatcher_type()) -> ok_state_type().
+cloudi_service_init(_Args, _Prefix, _Timeout, Dispatcher) ->
+
+	% subscribe to different request patterns
+	cloudi_service:subscribe(Dispatcher, "metrics/get"),
+	cloudi_service:subscribe(Dispatcher, "metric_value/get"),
+	cloudi_service:subscribe(Dispatcher, "new_counter/get"),
+	cloudi_service:subscribe(Dispatcher, "notify/get"),
+
+    	{ok, #state{}}.
+
+%% @doc Handle an incoming service request 
+-spec cloudi_service_handle_request(type_type(), name_type(), pattern_type(), _, request_type(), _, _, _, _, state_type(), dispatcher_type()) -> record_type().
+
+%% Handle request for metric_value
+cloudi_service_handle_request(Type, Name, "/folsom/metric_value/get", _RequestInfo, Request,
+                              _Timeout, _Priority, _TransId, _Pid,
+                              #state{} = State, _Dispatcher) ->
+    
+    	?LOG_DEBUG("Handle Request: Type=~p, Name=~p, Request=~p", [Type, Name, Request]),
+
+	Metric_name = parse_metric_name(Request),
+        ?LOG_DEBUG("Metric name ~p", [Metric_name]),
+
+	ReplyRecord = cloudi_x_jsx:encode(cloudi_x_folsom_metrics:get_metric_value(Metric_name)),
+
+        ?LOG_DEBUG("Sending reply ~p", [ReplyRecord]),
+	{reply, ReplyRecord, State};
+
+%% Handle request for metrics
+cloudi_service_handle_request(Type, Name, "/folsom/metrics/get", _RequestInfo, Request,
+                              _Timeout, _Priority, _TransId, _Pid,
+                              #state{} = State, _Dispatcher) ->
+    
+    	?LOG_DEBUG("Handle Request: Type=~p, Name=~p, Request=~p", [Type, Name, Request]),
+
+	ReplyRecord = cloudi_x_jsx:encode(cloudi_x_folsom_metrics:get_metrics()),
+
+        ?LOG_DEBUG("Sending reply ~p", [ReplyRecord]),
+	{reply, ReplyRecord, State};
+
+%% Handle request for new_counter 
+cloudi_service_handle_request(Type, Name, "/folsom/new_counter/get", _RequestInfo, Request,
+                              _Timeout, _Priority, _TransId, _Pid,
+                              #state{} = State, _Dispatcher) ->
+    
+    	?LOG_DEBUG("Handle Request: Type=~p, Name=~p, Request=~p", [Type, Name, Request]),
+
+	Metric_name = parse_metric_name(Request),
+        ?LOG_DEBUG("Metric name ~p", [Metric_name]),
+
+	ReplyRecord = cloudi_x_jsx:encode(cloudi_x_folsom_metrics:new_counter(Metric_name)),
+
+        ?LOG_DEBUG("Sending reply ~p", [ReplyRecord]),
+	{reply, ReplyRecord, State};
+
+%% Handle request for notify 
+cloudi_service_handle_request(Type, Name, "/folsom/notify/get", _RequestInfo, Request,
+                              _Timeout, _Priority, _TransId, _Pid,
+                              #state{} = State, _Dispatcher) ->
+    
+    	?LOG_DEBUG("Handle Request: Type=~p, Name=~p, Request=~p", [Type, Name, Request]),
+
+	ReplyRecord = update_counter(Request),
+
+        ?LOG_DEBUG("Sending reply ~p", [ReplyRecord]),
+	{reply, ReplyRecord, State};
+
+
+%% Handle any other request not previously matched
+cloudi_service_handle_request(Type, Name, _Pattern, _RequestInfo, Request,
+                              _Timeout, _Priority, _TransId, _Pid,
+                              #state{} = State, _Dispatcher) ->
+    
+    	?LOG_DEBUG("Handle Request: Type=~p, Name=~p, Request=~p", [Type, Name, Request]),
+
+	ReplyRecord = cloudi_x_jsx:encode(["Invalid Request"]),
+
+        ?LOG_DEBUG("Sending reply=~p", [ReplyRecord]),
+	{reply, ReplyRecord, State}.
+
+
+%% @doc Handle an incoming Erlang message
+cloudi_service_handle_info(Request, State, _) ->
+    ?LOG_INFO("Message received\"~p\"", [Request]),
+    {noreply, State}.
+
+-spec cloudi_service_terminate(_, _, _) -> ok.
+%% @doc Terminate the service
+cloudi_service_terminate(_Reason, _Timeout, #state{}) -> ok.  
+
+
+%%%------------------------------------------------------------------------
+%%% Local functions
+%%%------------------------------------------------------------------------
+
+%
+% Parse the request to get the metric name
+%
+
+% Handle cases where the request is passed via HTTP
+parse_metric_name([{Metric_request, true}]) ->
+	Metric_list = binary_to_list(Metric_request),
+	list_to_atom(Metric_list);
+
+% Handle "normal" case
+parse_metric_name(Metric_request) ->
+	Metric_list = binary_to_list(Metric_request),
+	list_to_atom(Metric_list).
+
+% Handle simple notification requests where request is passed via HTTP
+update_counter([{Counter_request, true}])->
+	L = binary_to_list(Counter_request),
+	
+	Tokens = erl_scan:string(L),
+	case Tokens of 
+	
+		{ok,
+			[{'{',1},
+     			{atom,1,Metric_name},
+			{',',1},
+			{integer,1,Metric_value},
+			{'}',1}],
+    			1} ->
+
+		        ?LOG_DEBUG("Metric Name=~p, Metric Value=~p", [Metric_name, Metric_value]),
+			cloudi_x_folsom_metrics:notify({Metric_name, Metric_value});
+
+		{ok,
+        		[{'{',1},
+	                {atom,1,Metric_name},
+	                {',',1},
+	                {'{',1},
+	                {atom,1,Update_type},
+       		        {',',1},
+       	         	{integer,1,Metric_value},
+                	{'}',1},
+                	{'}',1}],
+                	1} ->
+
+        		?LOG_DEBUG("Metric Name=~p, Update type=~p, Metric Value=~p", [Metric_name, Update_type, Metric_value]),
+			cloudi_x_folsom_metrics:notify({Metric_name, {Update_type, Metric_value}}) 
+	
+	end;
+
+% Handle simple notification requests where request is not passed via HTTP
+update_counter(Counter_request)->
+	update_counter([{Counter_request, true}]).
