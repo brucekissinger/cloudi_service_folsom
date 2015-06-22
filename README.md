@@ -42,19 +42,19 @@ Examples using HTTP requests
 ----------------------------
 The following examples use the Curl command to execute an HTTP request
 
-# define the HTTP endpoint
+## define the HTTP endpoint
 export FOLSOM_HTTP=http://localhost:6467/folsom
 
-# Get list of metrics
+## Get list of metrics
 curl $FOLSOM_HTTP/metrics
 
-# Add a new counter metric
+## Add a new counter metric
 curl $FOLSOM_HTTP/new_counter?test_requests
 
-# Get the current value of the counter
+## Get the current value of the counter
 curl $FOLSOM_HTTP/metric_value?test_requests
 
-# Update the counter value
-# Note the use of the curl encoding feature to properly format the request
+## Update the counter value
+## Note the use of the curl encoding feature to properly format the request
 curl -G $FOLSOM_HTTP/notify --data-urlencode "{test_requests, {inc,1}}"
 
