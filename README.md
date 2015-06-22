@@ -2,7 +2,7 @@ Background
 ==========
 Folsom is an Erlang-based application that can collect realtime metrics and publish them. More details can be found at: 
 
-`https://github.com/boundary/folsom <https://github.com/boundary/folsom>`_
+`https://github.com/boundary/folsom <https://github.com/boundary/folsom>`
 
 This CloudI service allows other CloudI services to define new Folsom metrics, update those metrics, and get the current metric values.
 
